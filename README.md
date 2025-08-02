@@ -16,7 +16,7 @@ A real-time CPU monitoring tool for Linux that displays per-core frequencies, te
 - Linux operating system
 - Python 3.x
 - `lscpu` command available
-- Access to `/proc/cpuinfo` and `/sys/class/hwmon/`
+- Access to `/proc/cpuinfo`, `/proc/stat` and `/sys/class/hwmon/`
 
 ## Installation
 
@@ -104,18 +104,38 @@ Press 'q' to exit
 - **Temperatures**: Read from `/sys/class/hwmon/` sensors
 
 
-## Supported Temperature Sensors
+## Supported Sensors
 
-The tool automatically detects and displays temperatures from various hardware monitoring sources:
-- CPU package temperatures (k10temp, coretemp)
-- GPU temperatures (amdgpu, nvidia)
-- NVMe SSD temperatures
-- Network adapter temperatures
-- Memory module temperatures (spd5118)
-- Other available hwmon sensors
+The tool automatically detects and displays data from various hardware monitoring sources:
+
+### Available Sensor Types
+- **Temperatures**: CPU, GPU, NVMe SSDs, network adapters, memory modules
+- **Voltages**: GPU voltages (vddgfx, vddnb) and other voltage rails
+- **Power**: GPU power consumption and other power sensors
+- **Fan Speeds**: Detected when available through hwmon
+
+### Fan Speed Detection Issues
+
+**Common Issue on Newer Motherboards (ASRock X870, etc.):**
+
+Fan sensors may not be detected because newer Super I/O chips (like Nuvoton NCT6798D) aren't fully supported in current kernels. If `sensors-detect` finds your chip but fan speeds don't appear, try:
+
+```bash
+# Manually load the driver module
+sudo modprobe nct6775
+
+# Check if fans now appear
+sensors
+```
+
+**Note**: This workaround may only partially work until the driver is updated for your specific chip. Fan detection depends on:
+- Kernel version and driver support
+- Motherboard manufacturer implementation
+- Super I/O chip compatibility
 
 ## Notes
 
 - Requires root privileges on some systems to access certain temperature sensors
-- Temperature availability depends on your hardware and kernel drivers
+- Sensor availability depends on your hardware and kernel drivers
 - The display adapts to terminal size - resize your terminal if content appears truncated
+- Fan speeds require compatible hardware monitoring drivers

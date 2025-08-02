@@ -81,27 +81,185 @@ def calculate_cpu_usage(prev_stats, curr_stats):
 
     return usage
 
-def read_temperatures():
-    temps = {}
+def read_sensors():
+    sensors = {'temps': {}, 'fans': {}, 'voltages': {}, 'power': {}, 'pwm': {}}
     hwmon_path = '/sys/class/hwmon'
     try:
         for hwmon in os.listdir(hwmon_path):
-            name_path = os.path.join(hwmon_path, hwmon, 'name')
+            hwmon_dir = os.path.join(hwmon_path, hwmon)
+            name_path = os.path.join(hwmon_dir, 'name')
             if os.path.exists(name_path):
                 with open(name_path) as f:
-                    label = f.read().strip()
-                for i in range(10):
-                    temp_path = os.path.join(hwmon_path, hwmon, f'temp{i}_input')
-                    if os.path.exists(temp_path):
-                        with open(temp_path) as f:
-                            temp_milli = int(f.read().strip())
-                            temps[f"{label}_temp{i}"] = temp_milli / 1000
+                    device_name = f.read().strip()
+                
+                # Get all files in hwmon directory
+                for filename in os.listdir(hwmon_dir):
+                    file_path = os.path.join(hwmon_dir, filename)
+                    
+                    # Temperature sensors
+                    if filename.startswith('temp') and filename.endswith('_input'):
+                        try:
+                            with open(file_path) as f:
+                                temp_milli = int(f.read().strip())
+                                temp_id = filename[4:-6]  # Extract number from temp{N}_input
+                                
+                                # Try to get sensor label
+                                label_path = os.path.join(hwmon_dir, f'temp{temp_id}_label')
+                                if os.path.exists(label_path):
+                                    try:
+                                        with open(label_path) as label_f:
+                                            label = label_f.read().strip()
+                                            sensor_name = f"{device_name}_{label}"
+                                    except OSError:
+                                        sensor_name = f"{device_name}_temp{temp_id}"
+                                else:
+                                    sensor_name = f"{device_name}_temp{temp_id}"
+                                
+                                sensors['temps'][sensor_name] = temp_milli / 1000
+                        except (ValueError, OSError):
+                            continue
+                    
+                    # Fan sensors
+                    elif filename.startswith('fan') and filename.endswith('_input'):
+                        try:
+                            with open(file_path) as f:
+                                fan_rpm = int(f.read().strip())
+                                fan_id = filename[3:-6]  # Extract number from fan{N}_input
+                                
+                                # Try to get fan label
+                                label_path = os.path.join(hwmon_dir, f'fan{fan_id}_label')
+                                if os.path.exists(label_path):
+                                    try:
+                                        with open(label_path) as label_f:
+                                            label = label_f.read().strip()
+                                            sensor_name = f"{device_name}_{label}"
+                                    except OSError:
+                                        sensor_name = f"{device_name}_fan{fan_id}"
+                                else:
+                                    sensor_name = f"{device_name}_fan{fan_id}"
+                                
+                                sensors['fans'][sensor_name] = fan_rpm
+                        except (ValueError, OSError):
+                            continue
+                    
+                    # Voltage sensors
+                    elif filename.startswith('in') and filename.endswith('_input'):
+                        try:
+                            with open(file_path) as f:
+                                voltage_milli = int(f.read().strip())
+                                in_id = filename[2:-6]  # Extract number from in{N}_input
+                                
+                                # Try to get voltage label
+                                label_path = os.path.join(hwmon_dir, f'in{in_id}_label')
+                                if os.path.exists(label_path):
+                                    try:
+                                        with open(label_path) as label_f:
+                                            label = label_f.read().strip()
+                                            sensor_name = f"{device_name}_{label}"
+                                    except OSError:
+                                        sensor_name = f"{device_name}_in{in_id}"
+                                else:
+                                    sensor_name = f"{device_name}_in{in_id}"
+                                
+                                sensors['voltages'][sensor_name] = voltage_milli / 1000
+                        except (ValueError, OSError):
+                            continue
+                    
+                    # Power sensors
+                    elif filename.startswith('power') and filename.endswith('_input'):
+                        try:
+                            with open(file_path) as f:
+                                power_micro = int(f.read().strip())
+                                power_id = filename[5:-6]  # Extract number from power{N}_input
+                                
+                                # Try to get power label
+                                label_path = os.path.join(hwmon_dir, f'power{power_id}_label')
+                                if os.path.exists(label_path):
+                                    try:
+                                        with open(label_path) as label_f:
+                                            label = label_f.read().strip()
+                                            sensor_name = f"{device_name}_{label}"
+                                    except OSError:
+                                        sensor_name = f"{device_name}_power{power_id}"
+                                else:
+                                    sensor_name = f"{device_name}_power{power_id}"
+                                
+                                sensors['power'][sensor_name] = power_micro / 1000000
+                        except (ValueError, OSError):
+                            continue
+                    
+                    # PWM sensors (fan speed control)
+                    elif filename.startswith('pwm') and not '_' in filename:
+                        try:
+                            with open(file_path) as f:
+                                pwm_value = int(f.read().strip())
+                                pwm_id = filename[3:]  # Extract number from pwm{N}
+                                
+                                # Convert PWM value (0-255) to percentage
+                                pwm_percentage = (pwm_value / 255.0) * 100
+                                sensors['pwm'][f"{device_name}_pwm{pwm_id}"] = pwm_percentage
+                        except (ValueError, OSError):
+                            continue
     except Exception:
         pass
-    return temps
+    return sensors
 
 def alphanum_sort_key(s):
     return [int(t) if t.isdigit() else t.lower() for t in re.split('([0-9]+)', s)]
+
+def organize_fan_data(sensors):
+    """Organize fan data with associated temperatures and filter main temp sensors"""
+    fan_cooling_data = []
+    essential_temps = {}
+    
+    # Essential temperature sensors to keep in main temp section
+    essential_keywords = ['k10temp', 'nvme', 'amdgpu', 'spd5118', 'r8169', 'coretemp', 
+                         'systin', 'cputin', 'tsi0_temp', 'smbusmaster', 'auxtin']
+    
+    # Copy essential temperatures to main section (filter out invalid readings)
+    for temp_name, temp_value in sensors['temps'].items():
+        if any(keyword in temp_name.lower() for keyword in essential_keywords):
+            # Filter out clearly invalid temperatures
+            if temp_value > 0 and temp_value < 150:  # Reasonable temperature range
+                essential_temps[temp_name] = temp_value
+    
+    # Group fans by device and try to associate with temps
+    fan_devices = {}
+    for fan_name, fan_rpm in sensors['fans'].items():
+        # Extract device name (e.g., 'nct6799' from 'nct6799_fan1')
+        if '_fan' in fan_name:
+            device_name = fan_name.split('_fan')[0]
+            fan_id = fan_name.split('_fan')[1]
+            
+            if device_name not in fan_devices:
+                fan_devices[device_name] = []
+            
+            # Look for corresponding PWM percentage
+            pwm_percentage = None
+            pwm_key = f"{device_name}_pwm{fan_id}"
+            if pwm_key in sensors['pwm']:
+                pwm_percentage = sensors['pwm'][pwm_key]
+            
+            fan_devices[device_name].append({
+                'name': f"Fan{fan_id}",
+                'rpm': fan_rpm,
+                'pwm_percentage': pwm_percentage
+            })
+    
+    # Convert to display format with PWM percentages
+    for device_name, fans in fan_devices.items():
+        for fan_data in sorted(fans, key=lambda x: x['name']):
+            if fan_data['pwm_percentage'] is not None:
+                # Show N/A for PWM when RPM is 0 (likely disconnected fan)
+                if fan_data['rpm'] == 0:
+                    display_text = f"{fan_data['name']}: {fan_data['rpm']:4.0f}rpm (N/A)"
+                else:
+                    display_text = f"{fan_data['name']}: {fan_data['rpm']:4.0f}rpm ({fan_data['pwm_percentage']:3.0f}%)"
+            else:
+                display_text = f"{fan_data['name']}: {fan_data['rpm']:4.0f}rpm"
+            fan_cooling_data.append(display_text)
+    
+    return fan_cooling_data, essential_temps
 
 def safe_addstr(stdscr, y, x, text, max_y, max_x):
     """Safely add string to screen with bounds checking"""
@@ -115,6 +273,80 @@ def safe_addstr(stdscr, y, x, text, max_y, max_x):
         return True
     except curses.error:
         return False
+
+def display_two_column_sections(stdscr, sections_data, start_line, max_y, max_x):
+    """Display sensor sections in two columns side by side, keeping sections together"""
+    left_col_width = max_x // 2 - 2  # Leave some space between columns
+    right_col_x = max_x // 2 + 1
+    
+    # Prepare sections as separate blocks
+    left_sections = []
+    right_sections = []
+    
+    # Manually assign sections to columns to keep them together
+    section_count = len(sections_data)
+    
+    if section_count >= 5:
+        # If we have 5 sections: Temps, Fans, Additional CPU in left; Voltages, Power in right
+        left_sections = sections_data[:3]  # Temperatures, Fan Speeds, Additional CPU Info
+        right_sections = sections_data[3:]  # Voltages, Power
+    elif section_count == 4:
+        # If we have 4 sections: Temps, Fans in left; Voltages, Power in right
+        left_sections = sections_data[:2]  # Temperatures, Fans & Cooling
+        right_sections = sections_data[2:]  # Voltages, Power
+    elif section_count == 3:
+        # If we have 3 sections: First 2 in left, last in right
+        left_sections = sections_data[:2]
+        right_sections = sections_data[2:]
+    elif section_count == 2:
+        # If we have 2 sections: One in each column
+        left_sections = sections_data[:1]
+        right_sections = sections_data[1:]
+    else:
+        # If we have 1 section: Put it in left column
+        left_sections = sections_data
+        right_sections = []
+    
+    def format_sections(sections):
+        """Convert sections to display lines"""
+        lines = []
+        for section_title, section_items in sections:
+            if section_items:
+                lines.append(f"{section_title}")
+                for item in section_items:
+                    lines.append(f"  {item}")
+                lines.append("")  # Empty line between sections
+        # Remove last empty line if exists
+        if lines and lines[-1] == "":
+            lines.pop()
+        return lines
+    
+    left_lines = format_sections(left_sections)
+    right_lines = format_sections(right_sections)
+    
+    current_line = start_line
+    
+    # Display left column
+    for i, line_text in enumerate(left_lines):
+        if current_line + i >= max_y - 2:
+            break
+        # Truncate if too long for left column
+        if len(line_text) > left_col_width:
+            line_text = line_text[:left_col_width-3] + "..."
+        safe_addstr(stdscr, current_line + i, 0, line_text, max_y, max_x)
+    
+    # Display right column
+    for i, line_text in enumerate(right_lines):
+        if current_line + i >= max_y - 2:
+            break
+        # Truncate if too long for right column
+        available_width = max_x - right_col_x - 1
+        if len(line_text) > available_width:
+            line_text = line_text[:available_width-3] + "..."
+        safe_addstr(stdscr, current_line + i, right_col_x, line_text, max_y, max_x)
+    
+    # Return the line after the longest column
+    return current_line + max(len(left_lines), len(right_lines))
 
 def draw(stdscr):
     curses.curs_set(0)
@@ -142,7 +374,7 @@ def draw(stdscr):
 
     last_update = 0
     freqs = {}
-    temps = {}
+    sensors = {'temps': {}, 'fans': {}, 'voltages': {}, 'power': {}}
     cpu_usage = {}
 
     while True:
@@ -151,7 +383,7 @@ def draw(stdscr):
         # Only update data every second, regardless of input events
         if current_time - last_update >= 1.0:
             freqs = parse_cpu_frequencies()
-            temps = read_temperatures()
+            sensors = read_sensors()
 
             # Get CPU stats and calculate usage
             curr_cpu_stats = parse_cpu_stats()
@@ -182,41 +414,54 @@ def draw(stdscr):
             safe_addstr(stdscr, line, 2, freq_text, max_y, max_x)
             line += 1
 
-        # Show temperatures first
-        line += 1
-        if line < max_y - 2:
-            safe_addstr(stdscr, line, 0, "Temperatures (°C):", max_y, max_x)
+        # Organize fan data and filter temperatures
+        fan_cooling_data, essential_temps = organize_fan_data(sensors)
+        
+        # Prepare sections for two-column display
+        sections_for_columns = []
+        
+        # Essential temperatures
+        if essential_temps:
+            temp_items = [f"{name}: {value:5.1f}" for name, value in sorted(essential_temps.items(), key=lambda x: alphanum_sort_key(x[0]))]
+            sections_for_columns.append(("Temperatures (°C):", temp_items))
+        
+        # Fan Speeds  
+        if fan_cooling_data:
+            sections_for_columns.append(("Fan Speeds (RPM):", fan_cooling_data))
+        
+        # Additional CPU Info (place after fans, before voltages for better grouping)
+        additional_fields = [
+            "Thread(s) per core",
+            "Core(s) per socket", 
+            "Stepping",
+            "Frequency boost",
+            "CPU(s) scaling MHz",
+            "CPU max MHz",
+            "CPU min MHz"
+        ]
+        
+        cpu_info_items = []
+        for field in additional_fields:
+            if field in lscpu_info:
+                cpu_info_items.append(f"{field}: {lscpu_info[field]}")
+        
+        if cpu_info_items:
+            sections_for_columns.append(("Additional CPU Info:", cpu_info_items))
+        
+        # Voltages
+        if sensors['voltages']:
+            voltage_items = [f"{name}: {value:5.3f}" for name, value in sorted(sensors['voltages'].items(), key=lambda x: alphanum_sort_key(x[0]))]
+            sections_for_columns.append(("Voltages (V):", voltage_items))
+        
+        # Power
+        if sensors['power']:
+            power_items = [f"{name}: {value:6.3f}" for name, value in sorted(sensors['power'].items(), key=lambda x: alphanum_sort_key(x[0]))]
+            sections_for_columns.append(("Power (W):", power_items))
+        
+        # Display all sensor sections in two columns
+        if sections_for_columns:
             line += 1
-
-            for label in sorted(temps.keys(), key=alphanum_sort_key):
-                if line >= max_y - 2:
-                    break
-                safe_addstr(stdscr, line, 2, f"{label}: {temps[label]:5.1f}", max_y, max_x)
-                line += 1
-
-        # Show additional CPU info if there's space
-        line += 1
-        if line < max_y - 1:
-            safe_addstr(stdscr, line, 0, "Additional CPU Info:", max_y, max_x)
-            line += 1
-
-            # Display additional lscpu fields
-            additional_fields = [
-                "Thread(s) per core",
-                "Core(s) per socket",
-                "Stepping",
-                "Frequency boost",
-                "CPU(s) scaling MHz",
-                "CPU max MHz",
-                "CPU min MHz"
-            ]
-
-            for field in additional_fields:
-                if line >= max_y - 2:
-                    break
-                if field in lscpu_info:
-                    safe_addstr(stdscr, line, 2, f"{field}: {lscpu_info[field]}", max_y, max_x)
-                    line += 1
+            line = display_two_column_sections(stdscr, sections_for_columns, line, max_y, max_x)
 
         # Always show exit message at bottom - ensure it's visible
         try:
