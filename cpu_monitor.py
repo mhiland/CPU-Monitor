@@ -125,7 +125,19 @@ def draw(stdscr):
             safe_addstr(stdscr, line, 2, f"Core {cpu_id:2}: {freqs[cpu_id]:7.2f} MHz", max_y, max_x)
             line += 1
 
-        # Show additional CPU info first (more important)
+        # Show temperatures first
+        line += 1
+        if line < max_y - 2:
+            safe_addstr(stdscr, line, 0, "Temperatures (°C):", max_y, max_x)
+            line += 1
+
+            for label in sorted(temps.keys(), key=alphanum_sort_key):
+                if line >= max_y - 2:
+                    break
+                safe_addstr(stdscr, line, 2, f"{label}: {temps[label]:5.1f}", max_y, max_x)
+                line += 1
+
+        # Show additional CPU info if there's space
         line += 1
         if line < max_y - 1:
             safe_addstr(stdscr, line, 0, "Additional CPU Info:", max_y, max_x)
@@ -148,18 +160,6 @@ def draw(stdscr):
                 if field in lscpu_info:
                     safe_addstr(stdscr, line, 2, f"{field}: {lscpu_info[field]}", max_y, max_x)
                     line += 1
-
-        # Show temperatures if there's space
-        line += 1
-        if line < max_y - 2:
-            safe_addstr(stdscr, line, 0, "Temperatures (°C):", max_y, max_x)
-            line += 1
-
-            for label in sorted(temps.keys(), key=alphanum_sort_key):
-                if line >= max_y - 2:
-                    break
-                safe_addstr(stdscr, line, 2, f"{label}: {temps[label]:5.1f}", max_y, max_x)
-                line += 1
 
         # Always show exit message at bottom - ensure it's visible
         try:
