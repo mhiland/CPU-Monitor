@@ -38,6 +38,49 @@ def parse_cpu_frequencies():
         print(f"Unexpected error in parse_cpu_frequencies: {e}")
     return freqs
 
+def parse_cpu_stats():
+    """Parse CPU usage statistics from /proc/stat"""
+    stats = {}
+    try:
+        with open('/proc/stat', 'r') as f:
+            for line in f:
+                if line.startswith('cpu') and line[3:4].isdigit():
+                    parts = line.split()
+                    cpu_id = int(parts[0][3:])  # Extract number from 'cpu0', 'cpu1', etc.
+                    times = [int(x) for x in parts[1:]]
+                    stats[cpu_id] = times
+    except (OSError, ValueError, IndexError) as e:
+        print(f"Error reading /proc/stat: {e}")
+    return stats
+
+def calculate_cpu_usage(prev_stats, curr_stats):
+    """Calculate CPU usage percentage for each core"""
+    usage = {}
+    for cpu_id in curr_stats:
+        if cpu_id not in prev_stats:
+            continue
+
+        prev_times = prev_stats[cpu_id]
+        curr_times = curr_stats[cpu_id]
+
+        # Calculate deltas
+        prev_total = sum(prev_times)
+        curr_total = sum(curr_times)
+
+        prev_idle = prev_times[3]  # idle is the 4th field (index 3)
+        curr_idle = curr_times[3]
+
+        total_delta = curr_total - prev_total
+        idle_delta = curr_idle - prev_idle
+
+        if total_delta > 0:
+            usage_percent = ((total_delta - idle_delta) / total_delta) * 100
+            usage[cpu_id] = max(0, min(100, usage_percent))  # Clamp between 0-100
+        else:
+            usage[cpu_id] = 0
+
+    return usage
+
 def read_temperatures():
     temps = {}
     hwmon_path = '/sys/class/hwmon'
@@ -82,7 +125,7 @@ def draw(stdscr):
     curses.start_color()
     curses.use_default_colors()
     curses.init_pair(1, curses.COLOR_GREEN, -1)  # Green text on default background
-    
+
     # Disable mouse events completely
     try:
         curses.mousemask(0)
@@ -93,9 +136,14 @@ def draw(stdscr):
     lscpu_info = get_lscpu_info()
     model_name = lscpu_info.get('Model name', 'Unknown CPU')
 
+    # Take initial readings and wait 1 second to have data ready immediately
+    prev_cpu_stats = parse_cpu_stats()
+    time.sleep(1)
+
     last_update = 0
     freqs = {}
     temps = {}
+    cpu_usage = {}
 
     while True:
         current_time = time.time()
@@ -104,6 +152,12 @@ def draw(stdscr):
         if current_time - last_update >= 1.0:
             freqs = parse_cpu_frequencies()
             temps = read_temperatures()
+
+            # Get CPU stats and calculate usage
+            curr_cpu_stats = parse_cpu_stats()
+            cpu_usage = calculate_cpu_usage(prev_cpu_stats, curr_cpu_stats)
+            prev_cpu_stats = curr_cpu_stats
+
             last_update = current_time
             need_refresh = True
         else:
@@ -122,7 +176,10 @@ def draw(stdscr):
         for cpu_id in sorted(freqs.keys()):
             if line >= max_y - 2:  # Leave room for exit message
                 break
-            safe_addstr(stdscr, line, 2, f"Core {cpu_id:2}: {freqs[cpu_id]:7.2f} MHz", max_y, max_x)
+            freq_text = f"Core {cpu_id:2}: {freqs[cpu_id]:7.2f} MHz"
+            if cpu_id in cpu_usage:
+                freq_text += f" ({cpu_usage[cpu_id]:5.1f}%)"
+            safe_addstr(stdscr, line, 2, freq_text, max_y, max_x)
             line += 1
 
         # Show temperatures first
@@ -146,7 +203,7 @@ def draw(stdscr):
             # Display additional lscpu fields
             additional_fields = [
                 "Thread(s) per core",
-                "Core(s) per socket", 
+                "Core(s) per socket",
                 "Stepping",
                 "Frequency boost",
                 "CPU(s) scaling MHz",
@@ -179,7 +236,7 @@ def draw(stdscr):
             if key in (ord('q'), ord('Q')):
                 break
             # Explicitly ignore mouse wheel and other events
-            elif key in (curses.KEY_MOUSE, 410, 411, 412, 413, 414, 415):  # Various mouse/scroll codes
+            elif key in MOUSE_SCROLL_CODES:
                 continue
         except curses.error:
             continue
@@ -194,4 +251,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
