@@ -405,14 +405,58 @@ def draw(stdscr):
 
         safe_addstr(stdscr, line, 0, "-" * min(40, max_x-1), max_y, max_x)
         line += 1
-        for cpu_id in sorted(freqs.keys()):
-            if line >= max_y - 2:  # Leave room for exit message
-                break
-            freq_text = f"Core {cpu_id:2}: {freqs[cpu_id]:7.2f} MHz"
-            if cpu_id in cpu_usage:
-                freq_text += f" ({cpu_usage[cpu_id]:5.1f}%)"
-            safe_addstr(stdscr, line, 2, freq_text, max_y, max_x)
-            line += 1
+        
+        # Use two-column layout for CPU cores if more than 8 cores
+        sorted_cpu_ids = sorted(freqs.keys())
+        if len(sorted_cpu_ids) > 8:
+            # Two-column CPU layout
+            left_col_width = max_x // 2 - 2
+            right_col_x = max_x // 2 + 1
+            
+            # Split cores evenly between columns
+            mid_point = (len(sorted_cpu_ids) + 1) // 2
+            left_cores = sorted_cpu_ids[:mid_point]
+            right_cores = sorted_cpu_ids[mid_point:]
+            
+            start_line = line
+            max_cores_per_column = max(len(left_cores), len(right_cores))
+            
+            # Display left column cores
+            for i, cpu_id in enumerate(left_cores):
+                if start_line + i >= max_y - 2:
+                    break
+                freq_text = f"Core {cpu_id:2}: {freqs[cpu_id]:7.2f} MHz"
+                if cpu_id in cpu_usage:
+                    freq_text += f" ({cpu_usage[cpu_id]:5.1f}%)"
+                # Truncate if too long for left column
+                if len(freq_text) > left_col_width:
+                    freq_text = freq_text[:left_col_width-3] + "..."
+                safe_addstr(stdscr, start_line + i, 2, freq_text, max_y, max_x)
+            
+            # Display right column cores
+            for i, cpu_id in enumerate(right_cores):
+                if start_line + i >= max_y - 2:
+                    break
+                freq_text = f"Core {cpu_id:2}: {freqs[cpu_id]:7.2f} MHz"
+                if cpu_id in cpu_usage:
+                    freq_text += f" ({cpu_usage[cpu_id]:5.1f}%)"
+                # Truncate if too long for right column
+                available_width = max_x - right_col_x - 1
+                if len(freq_text) > available_width:
+                    freq_text = freq_text[:available_width-3] + "..."
+                safe_addstr(stdscr, start_line + i, right_col_x, freq_text, max_y, max_x)
+            
+            line = start_line + max_cores_per_column
+        else:
+            # Single column layout for 8 or fewer cores
+            for cpu_id in sorted_cpu_ids:
+                if line >= max_y - 2:  # Leave room for exit message
+                    break
+                freq_text = f"Core {cpu_id:2}: {freqs[cpu_id]:7.2f} MHz"
+                if cpu_id in cpu_usage:
+                    freq_text += f" ({cpu_usage[cpu_id]:5.1f}%)"
+                safe_addstr(stdscr, line, 2, freq_text, max_y, max_x)
+                line += 1
 
         # Organize fan data and filter temperatures
         fan_cooling_data, essential_temps = organize_fan_data(sensors)
