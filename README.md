@@ -13,7 +13,7 @@ A real-time CPU monitoring tool for Linux that displays per-core frequencies, te
 
 ## Requirements
 
-- Linux operating system
+- Linux operating system (tested on x86/AMD and ARM/Raspberry Pi)
 - Python 3.x
 - `lscpu` command available
 - Access to `/proc/cpuinfo`, `/proc/stat` and `/sys/class/hwmon/`
