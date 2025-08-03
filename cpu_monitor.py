@@ -27,17 +27,15 @@ def get_base_frequency():
         # Try ACPI CPPC nominal frequency first (more accurate for AMD)
         with open('/sys/devices/system/cpu/cpu0/acpi_cppc/nominal_freq', 'r') as f:
             base_freq_mhz = int(f.read().strip())
-            # Convert MHz to GHz
-            base_freq_ghz = base_freq_mhz / 1000
-            return f"{base_freq_ghz:.2f} GHz"
+            return f"{base_freq_mhz:.4f}"
     except (OSError, ValueError):
         try:
             # Fallback to CPUfreq max frequency
             with open('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq', 'r') as f:
                 base_freq_khz = int(f.read().strip())
-                # Convert kHz to GHz
-                base_freq_ghz = base_freq_khz / 1000000
-                return f"{base_freq_ghz:.2f} GHz"
+                # Convert kHz to MHz
+                base_freq_mhz = base_freq_khz / 1000
+                return f"{base_freq_mhz:.4f}"
         except (OSError, ValueError):
             return None
 
