@@ -21,6 +21,26 @@ def get_lscpu_info():
         print(f"Error in get_lscpu_info: {e}", file=sys.stderr)
         return {}
 
+def get_base_frequency():
+    """Get base CPU frequency from ACPI CPPC or CPUfreq sysfs interface"""
+    try:
+        # Try ACPI CPPC nominal frequency first (more accurate for AMD)
+        with open('/sys/devices/system/cpu/cpu0/acpi_cppc/nominal_freq', 'r') as f:
+            base_freq_mhz = int(f.read().strip())
+            # Convert MHz to GHz
+            base_freq_ghz = base_freq_mhz / 1000
+            return f"{base_freq_ghz:.2f} GHz"
+    except (OSError, ValueError):
+        try:
+            # Fallback to CPUfreq max frequency
+            with open('/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq', 'r') as f:
+                base_freq_khz = int(f.read().strip())
+                # Convert kHz to GHz
+                base_freq_ghz = base_freq_khz / 1000000
+                return f"{base_freq_ghz:.2f} GHz"
+        except (OSError, ValueError):
+            return None
+
 def parse_cpu_frequencies():
     freqs = {}
     cpu_id = None
@@ -481,12 +501,19 @@ def draw(stdscr):
             "Frequency boost",
             "CPU(s) scaling MHz",
             "CPU max MHz",
+            "CPU base MHz",  # Position between max and min
             "CPU min MHz"
         ]
         
         cpu_info_items = []
+        base_freq = get_base_frequency()
+        
         for field in additional_fields:
-            if field in lscpu_info:
+            if field == "CPU base MHz":
+                # Insert base frequency here if available
+                if base_freq:
+                    cpu_info_items.append(f"{field}: {base_freq}")
+            elif field in lscpu_info:
                 cpu_info_items.append(f"{field}: {lscpu_info[field]}")
         
         if cpu_info_items:
