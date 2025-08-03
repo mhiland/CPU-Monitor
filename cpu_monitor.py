@@ -56,6 +56,21 @@ def parse_cpu_frequencies():
         print(f"Error reading /proc/cpuinfo: {e}")
     except Exception as e:
         print(f"Unexpected error in parse_cpu_frequencies: {e}")
+    
+    # Fallback for ARM systems where /proc/cpuinfo doesn't include MHz
+    if not freqs:
+        try:
+            cpu_dirs = [d for d in os.listdir('/sys/devices/system/cpu/') if d.startswith('cpu') and d[3:].isdigit()]
+            for cpu_dir in sorted(cpu_dirs):
+                cpu_num = int(cpu_dir[3:])
+                freq_path = f'/sys/devices/system/cpu/{cpu_dir}/cpufreq/scaling_cur_freq'
+                if os.path.exists(freq_path):
+                    with open(freq_path, 'r') as f:
+                        freq_khz = int(f.read().strip())
+                        freqs[cpu_num] = freq_khz / 1000  # Convert kHz to MHz
+        except Exception as e:
+            print(f"Error reading cpufreq: {e}")
+    
     return freqs
 
 def parse_cpu_stats():
@@ -227,6 +242,31 @@ def read_sensors():
 def alphanum_sort_key(s):
     return [int(t) if t.isdigit() else t.lower() for t in re.split('([0-9]+)', s)]
 
+def read_thermal_zones():
+    """Read Raspberry Pi thermal zones"""
+    thermal_temps = {}
+    thermal_path = '/sys/class/thermal'
+    try:
+        if os.path.exists(thermal_path):
+            for item in os.listdir(thermal_path):
+                if item.startswith('thermal_zone'):
+                    zone_path = os.path.join(thermal_path, item)
+                    temp_path = os.path.join(zone_path, 'temp')
+                    type_path = os.path.join(zone_path, 'type')
+                    
+                    if os.path.exists(temp_path) and os.path.exists(type_path):
+                        try:
+                            with open(temp_path, 'r') as f:
+                                temp_milli = int(f.read().strip())
+                            with open(type_path, 'r') as f:
+                                zone_type = f.read().strip()
+                            thermal_temps[f"thermal_{zone_type}"] = temp_milli / 1000
+                        except (ValueError, OSError):
+                            continue
+    except OSError:
+        pass
+    return thermal_temps
+
 def organize_fan_data(sensors):
     """Organize fan data with associated temperatures and filter main temp sensors"""
     fan_cooling_data = []
@@ -234,7 +274,7 @@ def organize_fan_data(sensors):
     
     # Essential temperature sensors to keep in main temp section
     essential_keywords = ['k10temp', 'nvme', 'amdgpu', 'spd5118', 'r8169', 'coretemp', 
-                         'systin', 'cputin', 'tsi0_temp', 'smbusmaster', 'auxtin']
+                         'systin', 'cputin', 'tsi0_temp', 'smbusmaster', 'auxtin', 'thermal_cpu']
     
     # Copy essential temperatures to main section (filter out invalid readings)
     for temp_name, temp_value in sensors['temps'].items():
@@ -478,6 +518,11 @@ def draw(stdscr):
                 safe_addstr(stdscr, line, 2, freq_text, max_y, max_x)
                 line += 1
 
+        # Add thermal zone temperatures for Raspberry Pi
+        thermal_temps = read_thermal_zones()
+        for name, temp in thermal_temps.items():
+            sensors['temps'][name] = temp
+        
         # Organize fan data and filter temperatures
         fan_cooling_data, essential_temps = organize_fan_data(sensors)
         
