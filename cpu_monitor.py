@@ -2,6 +2,7 @@ import curses
 import subprocess
 import re
 import os
+import sys
 import time
 
 # Mouse/scroll event codes (may vary by terminal; update as needed)
@@ -604,6 +605,14 @@ def main():
     if not os.path.exists('/proc/cpuinfo'):
         print("This script only works on Linux with /proc/cpuinfo")
         return
+
+    # Terminals like Ghostty set TERM=xterm-ghostty, which has no terminfo
+    # entry on systems that lack it installed. Fall back to a widely
+    # available entry rather than crashing.
+    try:
+        curses.setupterm(term=os.environ.get('TERM', 'unknown'), fd=sys.stdout.fileno())
+    except curses.error:
+        os.environ['TERM'] = 'xterm-256color'
 
     # Use curses.wrapper to safely initialize and clean up the curses environment
     curses.wrapper(draw)
